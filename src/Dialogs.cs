@@ -122,17 +122,20 @@ namespace Triquetra
                 f.AutoScaleMode = AutoScaleMode.None;
 
                 Icon sysIcon = IconFor(icon);
-                int picBottom = 0;
+                int picBottom = 0, picRight = 0;
                 if (sysIcon != null)
                 {
                     PictureBox pic = new PictureBox();
                     pic.Image = sysIcon.ToBitmap();
                     pic.SizeMode = PictureBoxSizeMode.AutoSize;
-                    pic.Location = new Point(20, 20);
+                    pic.Location = new Point(Ctrl.S(20), Ctrl.S(20));
                     f.Controls.Add(pic);
                     picBottom = pic.Bottom;
+                    picRight = pic.Right;
                 }
-                int textLeft = sysIcon != null ? 66 : 20;
+                // Layout constants are authored at 96 DPI; Ctrl.S() scales them
+                // (measured text/icon sizes are already real pixels).
+                int textLeft = sysIcon != null ? picRight + Ctrl.S(14) : Ctrl.S(20);
 
                 Label lbl = new Label();
                 lbl.Text = text;
@@ -140,17 +143,17 @@ namespace Triquetra
                 lbl.ForeColor = Theme.Fg;
                 lbl.BackColor = Color.Transparent;
                 lbl.AutoSize = true;
-                lbl.MaximumSize = new Size(360, 0);
-                lbl.Location = new Point(textLeft, 22);
+                lbl.MaximumSize = new Size(Ctrl.S(360), 0);
+                lbl.Location = new Point(textLeft, Ctrl.S(22));
                 f.Controls.Add(lbl);
 
-                int contentBottom = Math.Max(lbl.Bottom, picBottom) + 24;
-                int clientWidth = Math.Max(360, textLeft + lbl.Width + 20);
+                int contentBottom = Math.Max(lbl.Bottom, picBottom) + Ctrl.S(24);
+                int clientWidth = Math.Max(Ctrl.S(360), textLeft + lbl.Width + Ctrl.S(20));
 
                 string[] labels; DialogResult[] results;
                 ButtonSpecsFor(buttons, out labels, out results);
 
-                int btnH = 30, gap = 10, btnBottomMargin = 16;
+                int btnH = Ctrl.S(30), gap = Ctrl.S(10), btnBottomMargin = Ctrl.S(16);
                 Font btnFont = Ctrl.SegoUI();
 
                 // Every button in the row shares one uniform Width (the
@@ -159,7 +162,7 @@ namespace Triquetra
                 // otherwise looks uneven despite being top/bottom-aligned.
                 int uniformBtnW = 0;
                 for (int i = 0; i < labels.Length; i++)
-                    uniformBtnW = Math.Max(uniformBtnW, TextRenderer.MeasureText(labels[i], btnFont).Width + 30);
+                    uniformBtnW = Math.Max(uniformBtnW, TextRenderer.MeasureText(labels[i], btnFont).Width + Ctrl.S(30));
 
                 Button[] btns = new Button[labels.Length];
                 for (int i = 0; i < labels.Length; i++)
@@ -190,7 +193,7 @@ namespace Triquetra
                 }
                 int totalBtnW = (uniformBtnW + gap) * labels.Length - gap;
 
-                clientWidth = Math.Max(clientWidth, totalBtnW + 40);
+                clientWidth = Math.Max(clientWidth, totalBtnW + Ctrl.S(40));
                 int x = (clientWidth - totalBtnW) / 2;
                 foreach (Button b in btns)
                 {

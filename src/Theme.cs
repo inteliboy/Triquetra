@@ -40,6 +40,41 @@ namespace Triquetra
     // =========================================================================
     static class Ctrl
     {
+        // System DPI / 96 (1.5 at 150% scaling). Program.Main opts into system
+        // DPI awareness before any window exists, so this is the real value.
+        // UI code is authored in 96-DPI pixels; fixed pixel values created at
+        // runtime go through S(), whole control trees through ScaleForDpi().
+        static float _dpiScale;
+        public static float DpiScale
+        {
+            get
+            {
+                if (_dpiScale == 0f)
+                {
+                    try
+                    {
+                        using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+                            _dpiScale = g.DpiX / 96f;
+                    }
+                    catch { _dpiScale = 1f; }
+                    if (_dpiScale < 1f) _dpiScale = 1f;
+                }
+                return _dpiScale;
+            }
+        }
+        public static int S(int px) { return (int)Math.Round(px * DpiScale); }
+        // Converts a MEASURED / native device-pixel value (MeasureText,
+        // PreferredHeight) back to the 96-DPI units the layout is authored in.
+        // Needed for sizes assigned before Ctrl.ScaleForDpi runs, otherwise
+        // the later Scale multiplies an already-real-pixel value a second time.
+        public static int Unscale(int devicePx) { return (int)Math.Ceiling(devicePx / DpiScale); }
+
+        public static void ScaleForDpi(Control c)
+        {
+            float s = DpiScale;
+            if (s > 1.001f) c.Scale(new SizeF(s, s));
+        }
+
         public static Font SegoUI(float size, FontStyle style)
         { return new Font("Segoe UI", size, style); }
         public static Font SegoUI(float size) { return SegoUI(size, FontStyle.Regular); }
@@ -97,7 +132,7 @@ namespace Triquetra
         // factory default to fit a layout.
         public static int TextButtonHeight(Font font)
         {
-            return TextRenderer.MeasureText("Ap gy", font).Height + 10;
+            return Unscale(TextRenderer.MeasureText("Ap gy", font).Height) + 10;
         }
 
         // The height a word-wrapping Label needs to show ALL of its text at
@@ -162,8 +197,8 @@ namespace Triquetra
             // own OnPaint lays out box+gap+text.
             cb.AutoSize = false;
             Size sz = TextRenderer.MeasureText(text, cb.Font);
-            cb.Width  = 14 + 8 + sz.Width + 4;
-            cb.Height = Math.Max(16, sz.Height + 4);
+            cb.Width  = 14 + 8 + Unscale(sz.Width) + 4;
+            cb.Height = Math.Max(16, Unscale(sz.Height) + 4);
             return cb;
         }
 

@@ -43,6 +43,7 @@ namespace Triquetra
         // UUPDumpGUI's hardcoded-2-tab version to an arbitrary tab count).
         Panel   _tabRowFill, _tabFrameTop, _tabFrameBottom, _tabFrameLeft, _tabFrameRight, _tabGroupTop;
         Panel[] _tabInterGapFills;
+        Action  _layoutTabOverlays;
 
         // True once the handle is created and BeginInvoke is safe to call.
         volatile bool _handleReady;
@@ -68,6 +69,12 @@ namespace Triquetra
             catch { }
 
             BuildUI();
+            // The layout is authored at 96 DPI; fonts are in points and already
+            // follow DPI, so scale every size/location/padding to match. The
+            // tab overlays are derived from native (device-pixel) tab rects,
+            // so they are re-laid-out afterwards instead of being scaled.
+            Ctrl.ScaleForDpi(this);
+            if (_layoutTabOverlays != null) _layoutTabOverlays();
             ResumeLayout(false);
 
             // Subscribe to log events. Guard with _handleReady to avoid
@@ -259,34 +266,36 @@ namespace Triquetra
             Action layout = delegate()
             {
                 if (_tabs.TabCount == 0) return;
+                int e2 = Ctrl.S(2), e3 = Ctrl.S(3), e4 = Ctrl.S(4), e6 = Ctrl.S(6), e7 = Ctrl.S(7);
                 Rectangle lastTabRect = _tabs.GetTabRect(_tabs.TabCount - 1);
 
-                _tabRowFill.Location = new Point(_tabs.Left + lastTabRect.Right - 3, _tabs.Top);
-                _tabRowFill.Size = new Size(Math.Max(0, _tabs.Width - lastTabRect.Right + 3), lastTabRect.Bottom);
+                _tabRowFill.Location = new Point(_tabs.Left + lastTabRect.Right - e3, _tabs.Top);
+                _tabRowFill.Size = new Size(Math.Max(0, _tabs.Width - lastTabRect.Right + e3), lastTabRect.Bottom);
 
                 for (int i = 0; i < gaps; i++)
                 {
                     Rectangle a = _tabs.GetTabRect(i);
                     Rectangle b = _tabs.GetTabRect(i + 1);
-                    _tabInterGapFills[i].Location = new Point(_tabs.Left + a.Right - 2, _tabs.Top);
-                    _tabInterGapFills[i].Size = new Size(Math.Max(0, b.Left - a.Right + 4), lastTabRect.Bottom);
+                    _tabInterGapFills[i].Location = new Point(_tabs.Left + a.Right - e2, _tabs.Top);
+                    _tabInterGapFills[i].Size = new Size(Math.Max(0, b.Left - a.Right + e4), lastTabRect.Bottom);
                 }
 
-                _tabFrameTop.Location = new Point(_tabs.Left, _tabs.Top + lastTabRect.Bottom - 3);
-                _tabFrameTop.Size = new Size(_tabs.Width, 7);
+                _tabFrameTop.Location = new Point(_tabs.Left, _tabs.Top + lastTabRect.Bottom - e3);
+                _tabFrameTop.Size = new Size(_tabs.Width, e7);
 
                 _tabGroupTop.Location = new Point(_tabs.Left, _tabs.Top);
-                _tabGroupTop.Size = new Size(_tabs.Width, 4);
+                _tabGroupTop.Size = new Size(_tabs.Width, e4);
 
-                _tabFrameBottom.Location = new Point(_tabs.Left, _tabs.Bottom - 6);
-                _tabFrameBottom.Size = new Size(_tabs.Width, 6);
+                _tabFrameBottom.Location = new Point(_tabs.Left, _tabs.Bottom - e6);
+                _tabFrameBottom.Size = new Size(_tabs.Width, e6);
 
                 _tabFrameLeft.Location = new Point(_tabs.Left, _tabs.Top);
-                _tabFrameLeft.Size = new Size(4, _tabs.Height);
+                _tabFrameLeft.Size = new Size(e4, _tabs.Height);
 
-                _tabFrameRight.Location = new Point(_tabs.Right - 4, _tabs.Top);
-                _tabFrameRight.Size = new Size(4, _tabs.Height);
+                _tabFrameRight.Location = new Point(_tabs.Right - e4, _tabs.Top);
+                _tabFrameRight.Size = new Size(e4, _tabs.Height);
             };
+            _layoutTabOverlays = layout;
             layout();
             _tabs.Resize += delegate(object s, EventArgs e) { layout(); };
         }
@@ -388,6 +397,9 @@ namespace Triquetra
             _buildList.Font                = Ctrl.SegoUI();
             _buildList.SelectionMode       = SelectionMode.One;
             _buildList.HorizontalScrollbar = false;
+            // Default (true) snaps the height to whole rows, leaving a strip of the
+            // bordered wrapper's lighter background below the last row.
+            _buildList.IntegralHeight      = false;
             _buildList.SelectedIndexChanged += delegate(object s, EventArgs e)
             {
                 _selectedBuild = _buildList.SelectedItem != null
@@ -637,7 +649,7 @@ namespace Triquetra
             // PreferredHeight, the TableLayoutPanel's AutoSize row balloons
             // to 100px since Dock.Fill only fills whatever height the row
             // already decided on, it doesn't derive one from the content.
-            wrap.Height = tb.PreferredHeight + 2;
+            wrap.Height = Ctrl.Unscale(tb.PreferredHeight) + 2;
             tl.Controls.Add(wrap, 1, row);
         }
 
@@ -648,7 +660,10 @@ namespace Triquetra
 
             FlowLayoutPanel toolbar = new FlowLayoutPanel();
             toolbar.Dock = DockStyle.Top; toolbar.Height = 40;
-            toolbar.Padding = new Padding(8, 6, 8, 0);
+            // Its buttons AutoSize from the font (real pixels), so a fixed 96-DPI
+            // height clips them once scaled - let the bar follow its content.
+            toolbar.AutoSize = true; toolbar.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            toolbar.Padding = new Padding(8, 6, 8, 6);
             toolbar.BackColor = Color.Transparent;
             toolbar.FlowDirection = FlowDirection.LeftToRight;
 
@@ -920,6 +935,17 @@ namespace Triquetra
                     }
                 }
 
+                // Did the last install actually change the build after its
+                // reboot? (MUMX v2 updates can be reverted at boot even though
+                // dism reported success.)
+                string pendingWarn = PendingInstall.Check(_localParts);
+                if (pendingWarn != null)
+                    BeginInvoke(new Action(delegate()
+                    {
+                        ThemedMessageBox.Show(this, pendingWarn, "Update did not apply",
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }));
+
                 SetStatus("Ready");
             }
             catch (Exception ex)
@@ -1143,11 +1169,33 @@ namespace Triquetra
 
                 if (selMsu != null)
                 {
+                    // The folder also carries the standalone SSU cab; install it
+                    // first (same order as the ESD path) so the servicing stack
+                    // is current before the MSU is applied.
+                    string ssuPath = selCab != null ? Dl(selCab) : null;
                     string msuPath = Dl(selMsu);
                     string ndpPath = selNdp != null ? Dl(selNdp) : null;
+                    if (ssuPath != null)
+                    {
+                        int rcS = InstallPkg(ssuPath);
+                        if (!DismRc.IsSuccess(rcS)) throw new Exception("SSU install failed (rc=" + rcS + ")");
+                        if (!dryRun)
+                        {
+                            SetStatus("SSU installed – waiting for servicing stack to settle ...");
+                            Logger.Log("Waiting 5s for servicing stack to settle ...");
+                            Thread.Sleep(5000);
+                            SetStatus("Refreshing DISM package state ...");
+                            DismHelper.RefreshPackageState(delegate(string s2) { SetStatus(s2); });
+                        }
+                    }
+                    else Logger.Log("No standalone SSU cab in this folder - installing the MSU alone.");
+                    Logger.Log("Installing MSU (dism expands the package first; this can take a long time) ...");
                     int rc = InstallPkg(msuPath);
                     if (!DismRc.IsSuccess(rc)) throw new Exception("MSU install failed (rc=" + rc + ")");
                     if (ndpPath != null) InstallPkg(ndpPath);
+                    // A cumulative update from an MSU only finishes applying
+                    // during the next boot, whatever exit code dism returned.
+                    rebootNeeded[0] = true;
                 }
                 else
                 {
@@ -1176,6 +1224,9 @@ namespace Triquetra
                     if (!DismRc.IsSuccess(rc2)) throw new Exception("ESD install failed (rc=" + rc2 + ")");
                     if (ndpPath != null) InstallPkg(ndpPath);
                 }
+
+                // Verified on the next start (see PendingInstall).
+                if (!dryRun) PendingInstall.Record(best);
 
                 string completionMsg = rebootNeeded[0]
                     ? "Update installed successfully. A reboot is required."
